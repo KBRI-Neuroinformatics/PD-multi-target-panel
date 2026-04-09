@@ -1,0 +1,244 @@
+---
+title: "ANCOVA"
+output:
+    html_document:
+        toc: true
+        toc_float: true
+        number_sections: true
+        code_folding: hide
+---
+
+```{r}
+rm(list=ls())
+```
+
+# Loading Packages
+
+```{r}
+# install.packages("data.table")
+# install.packages("dplyr")
+# install.packages("reshape2")
+# install.packages("ggplot2")
+# install.packages("rstatix")
+
+suppressPackageStartupMessages({
+    library(data.table)
+    library(dplyr)
+    library(reshape2)
+    library(ggplot2)
+    library(rstatix)
+})
+```
+
+# Reading Data
+
+## NPX table
+
+```{r}
+NPX_table <- fread(paste0(
+    "..",
+    "/..",
+    "/00_Data",
+    "/04_00_log2_trans_table.csv"))
+```
+
+## Prot Info
+
+```{r}
+prot_info <- fread(paste0(
+    "..",
+    "/..",
+    "/00_Data",
+    "/04_01_prot_info.csv"))
+```
+
+# Preprocessing
+
+```{r}
+prot_info <- 
+    prot_info |>
+    filter(
+        symbol %in% c(
+            "NTF3", "IL10", "IL17C", "PLAU"))
+
+NPX_table <-
+    NPX_table |>
+    mutate(
+        sex = ifelse(
+            Sex == "Male", 1,
+            ifelse(Sex == "Female", 0, NA)),
+        age = Age,
+        Group = label_PD) |>
+    filter(Group %in% c("HC", "PD"))
+```
+
+# ANCOVA
+
+## Control group, Experimental group, Test
+
+```{r}
+group_test_df <- data.frame()
+for(tmp_adj_var in c(
+    "age;sex")){
+    group_test_df <- rbind(
+        group_test_df,
+        data.frame(
+            CG      = c("HC"),
+            EG      = c("PD"),
+            adj_var = tmp_adj_var,
+            test    = "ANCOVA"))
+}
+```
+
+## Variables to analyze
+
+```{r}
+group_var_df <- data.frame(
+    group_var="Group",
+    name_modified="Group")
+
+cont_var_df <- data.frame(
+    group_var=prot_info$column_name,
+    name_modified=prot_info$symbol)
+```
+
+## Analysis result
+
+```{r, fig.width=1.618*2, fig.height=2}
+raw_data <- NPX_table |> data.frame()
+
+result_table <- data.frame()
+for(i in 1:nrow(group_test_df)){
+    result_table2 <- data.frame()
+    for(j in 1:nrow(cont_var_df)){
+        try({
+            if(is.na(group_test_df$adj_var[i]) |
+               (group_test_df$adj_var[i]=="")){
+                tmp_raw_data <-
+                    raw_data |>
+                    select_at(vars(c(
+                        group_var_df$group_var,
+                        cont_var_df$group_var[j])))
+            }else{
+                tmp_raw_data <-
+                    raw_data |>
+                    select_at(vars(c(
+                        group_var_df$group_var,
+                        cont_var_df$group_var[j],
+                        group_test_df$adj_var[i] |>
+                            strsplit(";",fixed=TRUE) |>
+                            unlist())))
+            }
+            
+            tmp_raw_data <- tmp_raw_data |>
+                mutate(Group = ifelse(
+                    .data[[group_var_df$group_var]] %in%
+                        (group_test_df$CG[i] |>
+                             strsplit(";",fixed=TRUE) |>
+                             unlist()),
+                    0, ifelse(.data[[group_var_df$group_var]] %in%
+                                  (group_test_df$EG[i] |>
+                                       strsplit(";",fixed=TRUE) |>
+                                       unlist()),
+                              1, NA))) |>
+                na.omit()
+            
+            tmp_raw_data[[cont_var_df$group_var[j]]] <-
+                scale(tmp_raw_data[[cont_var_df$group_var[j]]])
+            
+            if(group_test_df$test[i] == "Welch's t-test"){
+                tmp_result <- 
+                    as.formula(paste0(
+                        cont_var_df$group_var[j],
+                        " ~ Group")) |>
+                    t.test(data=tmp_raw_data)
+                tmp_p_value <- tmp_result$p.value
+                tmp_diff <-
+                    mean(
+                        tmp_raw_data[[
+                            cont_var_df$group_var[j]]][
+                                tmp_raw_data$Group==1])-
+                    mean(
+                        tmp_raw_data[[
+                            cont_var_df$group_var[j]]][
+                                tmp_raw_data$Group==0])
+            }
+            if(group_test_df$test[i] == "Mann-Whitney U test"){
+                tmp_result <- 
+                    as.formula(paste0(
+                        cont_var_df$group_var[j],
+                        " ~ Group")) |>
+                    wilcox.test(data=tmp_raw_data)
+                tmp_p_value <- tmp_result$p.value
+                tmp_diff <-
+                    median(
+                        tmp_raw_data[[
+                            cont_var_df$group_var[j]]][
+                                tmp_raw_data$Group==1])-
+                    median(
+                        tmp_raw_data[[
+                            cont_var_df$group_var[j]]][
+                                tmp_raw_data$Group==0])
+            }
+            if(group_test_df$test[i] == "ANCOVA"){
+                tmp_result <- 
+                    as.formula(paste0(
+                        cont_var_df$group_var[j],
+                        " ~ Group + ",
+                        group_test_df$adj_var[i] |>
+                            strsplit(";",fixed=TRUE) |>
+                            unlist() |>
+                            paste0(collapse="+"))) |>
+                    aov(data=tmp_raw_data) |>
+                    Anova(type="III")
+                tmp_p_value <- tmp_result["Group", "Pr(>F)"]
+                
+                tmp_lm <- as.formula(paste0(
+                    cont_var_df$group_var[j],
+                    " ~ Group + ",
+                    group_test_df$adj_var[i] |>
+                        strsplit(";",fixed=TRUE) |>
+                        unlist() |>
+                        paste0(collapse="+"))) |>
+                    lm(data=tmp_raw_data) |>
+                    coef()
+                tmp_diff <- tmp_lm["Group"]
+            }
+            result_table2 <- rbind(
+                result_table2,
+                data.frame(
+                    CG       = group_test_df$CG[i],
+                    N_CG     = sum(1-tmp_raw_data$Group),
+                    EG       = group_test_df$EG[i],
+                    N_EG     = sum(tmp_raw_data$Group),
+                    adj_var  = group_test_df$adj_var[i],
+                    Test     = group_test_df$test[i],
+                    var      = cont_var_df$group_var[j],
+                    var_name = cont_var_df$name_modified[j],
+                    std_coef = tmp_diff,
+                    p_value  = tmp_p_value))
+        })
+    }
+    result_table2 <- result_table2 |>
+        mutate(adj_p=p.adjust(p_value, method="fdr"))
+    result_table <- rbind(result_table, result_table2)
+}
+
+row.names(result_table) <- NULL
+```
+
+```{r}
+result_table |>
+    select_at(vars(c(-"var"))) |>
+    fwrite("./test_result.csv")
+```
+
+# sessionInfo()
+
+```{r}
+date()
+```
+
+```{r}
+sessionInfo()
+```

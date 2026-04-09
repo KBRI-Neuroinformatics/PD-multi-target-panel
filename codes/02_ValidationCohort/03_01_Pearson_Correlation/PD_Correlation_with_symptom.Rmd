@@ -1,0 +1,321 @@
+---
+title: "Correlation with Symptom"
+output:
+    html_document:
+        toc: true
+        toc_float: true
+        number_sections: true
+        code_folding: hide
+---
+
+```{r}
+rm(list=ls())
+```
+
+# Loading Packages
+
+```{r}
+# install.packages("data.table")
+# install.packages("dplyr")
+# install.packages("reshape2")
+# install.packages("ggplot2")
+
+suppressPackageStartupMessages({
+    library(data.table)
+    library(dplyr)
+    library(reshape2)
+    library(ggplot2)
+})
+```
+
+# Reading Datasets
+
+```{r}
+NPX_table <- fread(paste0(
+    "..",
+    "/..",
+    "/00_Data",
+    "/02_00_Exp_table.csv"))
+```
+
+# PD
+
+```{r}
+NPX_table <-
+    NPX_table |>
+    filter(Group %in% c("PD"))
+```
+
+## Correlation
+
+```{r}
+Cor_Result_df <- data.frame()
+```
+
+```{r}
+anal_data <- NPX_table |>
+    mutate_at(c(
+        "NTF3", "IL10", "IL17C", "uPA"),
+        as.numeric) |>
+    mutate(
+        NTF3.IL10 =-1.22237909*NTF3+0.90209911*IL10,
+        NTF3.IL17C=-1.0514283*NTF3 +0.6479172*IL17C,
+        NTF3.uPA  =-0.6899651*NTF3 -1.4763997*uPA,
+        IL10.IL17C=0.5989058*IL10  +0.6189479*IL17C,
+        IL10.uPA  =0.724864*IL10   -1.693367*uPA,
+        IL17C.uPA =0.6952256*IL17C -1.8534375*uPA) |>
+    mutate_at(c(
+        "Part.I...Behavior.and..Emotion.", "Part.II...ADL.",
+        "Part.III...Motor.Scale.", "Part.IV...drug..complication.",
+        "Part.V...Modified..H.Y.Stage.", "Part.VI...S.E.ADL.Score.",
+        "log2_NfL",
+        "K_MMSE.._total.._score", "CDR"),
+        as.numeric)
+
+tmp_var_1_df <-
+    data.frame(
+        var=
+            c("Part.I...Behavior.and..Emotion.",
+              "Part.II...ADL.",
+              "Part.III...Motor.Scale.",
+              "Part.IV...drug..complication.",
+              "Part.V...Modified..H.Y.Stage.",
+              "Part.VI...S.E.ADL.Score.",
+              "log2_NfL",
+              "K_MMSE.._total.._score",
+              "CDR"
+            ),
+        var_name=
+            c("UPDRS Part I",
+              "UPDRS Part II",
+              "UPDRS Part III",
+              "UPDRS Part IV",
+              "Modified H&Y",
+              "S&E ADL Score",
+              "log2_NfL",
+              "K-MMSE",
+              "CDR"))
+
+tmp_var_2_df <-
+    data.frame(
+        var=c(
+            "NTF3", "IL10", "IL17C", "uPA",
+            "NTF3.IL10", "NTF3.IL17C", "NTF3.uPA",
+            "IL10.IL17C", "IL10.uPA", "IL17C.uPA"
+        ),
+        var_name=c(
+            "NTF3", "IL10", "IL17C", "uPA",
+            "NTF3, IL10", "NTF3, IL17C", "NTF3, uPA",
+            "IL10, IL17C", "IL10, uPA", "IL17C, uPA"
+        ))
+```
+
+```{r, warning=FALSE, fig.width=2*1.618, fig.height=2*1}
+for(i in 1:nrow(tmp_var_1_df)){
+    for(j in 1:nrow(tmp_var_2_df)){
+        cat("####################\n")
+        cat("###",
+            tmp_var_1_df$var[i], " vs ",
+            tmp_var_2_df$var[j], "###\n")
+        cat("###",
+            tmp_var_1_df$var_name[i], " vs ",
+            tmp_var_2_df$var_name[j], "###\n")
+        
+        tmp_anal_df <-
+            anal_data |>
+            select_at(c(
+                "Group",
+                tmp_var_1_df$var[i],
+                tmp_var_2_df$var[j])) |>
+            na.omit()
+        
+        print(table(tmp_anal_df$Group))
+        
+        tmp_cor_test <- cor.test(
+            x     =tmp_anal_df[[tmp_var_1_df$var[i]]],
+            y     =tmp_anal_df[[tmp_var_2_df$var[j]]],
+            method="pearson",
+            exact =TRUE)
+        
+        tmp_cor_df <- data.frame(
+            var_1  =tmp_var_1_df$var_name[i],
+            var_2  =tmp_var_2_df$var_name[j],
+            cor    =tmp_cor_test$estimate,
+            pvalue =tmp_cor_test$p.value)
+        
+        Cor_Result_df <- rbind(
+            Cor_Result_df,
+            tmp_cor_df)
+        
+        print(tmp_cor_df)
+        
+        if(tmp_cor_df$pvalue < 0.05){
+            print(
+                tmp_anal_df |>
+                    ggplot() +
+                    aes(
+                        x=.data[[tmp_var_1_df$var[i]]],
+                        y=.data[[tmp_var_2_df$var[j]]]) +
+                    geom_point() +
+                    geom_smooth(method=lm) +
+                    xlab(tmp_var_1_df$var_name[i]) +
+                    ylab(tmp_var_2_df$var_name[j]) +
+                    theme_classic()
+            )
+        }
+    }
+}
+```
+
+## Saving the result
+
+```{r}
+Cor_Result_df |>
+    fwrite("./PD_COR_RESULT.csv")
+```
+
+# Plots
+
+```{r}
+corr_table <- Cor_Result_df |>
+    mutate(log10_pval=-log10(pvalue)) |>
+    mutate(
+        var_1=factor(
+            var_1, levels=c(
+                "UPDRS Part I", "UPDRS Part II",
+                "UPDRS Part III", "UPDRS Part IV",
+                "Modified H&Y", "S&E ADL Score",
+                "log2_NfL"))) |>
+    mutate(
+        var_2=factor(
+            var_2 |>
+                strsplit(", ", fixed=TRUE) |>
+                lapply(FUN=function(x){paste0(x,collapse=",\n")}) |>
+                unlist() |> unname(),
+            levels=c(
+                "NTF3", "IL10", "IL17C", "uPA",
+                "NTF3,\nIL10", "NTF3,\nIL17C", "NTF3,\nuPA",
+                "IL10,\nIL17C", "IL10,\nuPA", "IL17C,\nuPA"))) |>
+    na.omit()
+```
+
+```{r, fig.width=3*1.618, fig.height=2*1}
+corr_table |>
+    ggplot(aes(x=var_2, y=log10_pval, group_by=var_1, fill=var_1)) +
+    geom_bar(stat="identity", position="dodge", width=0.75) +
+    geom_hline(yintercept=-log10(0.05), linetype=2) +
+    theme_classic() +
+    ylab(expression(-log[10](p-value))) +
+    theme(axis.title.x=element_blank(),
+          panel.grid.major.y=element_line(color="lightgray"),
+          panel.border=element_blank(),
+          legend.title=element_blank(),
+          legend.position="bottom") +
+    coord_cartesian(
+        ylim=c(0,max(corr_table$log10_pval)+0.25)) +
+    scale_fill_discrete(
+        palette=c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2",
+                  "#D55E00", "#CC79A7"))
+```
+
+```{r, fig.width=3*1.618, fig.height=2*1}
+corr_table |>
+    ggplot(aes(x=var_2, y=log10_pval, group_by=var_1, fill=var_1)) +
+    geom_bar(stat="identity", position="dodge", width=0.75) +
+    geom_hline(yintercept=-log10(0.05), linetype=2) +
+    theme_classic() +
+    ylab(expression(-log[10](p-value))) +
+    theme(axis.title.x=element_blank(),
+          panel.grid.major.y=element_line(color="lightgray"),
+          panel.border=element_blank(),
+          legend.title=element_blank(),
+          legend.position="none") +
+    coord_cartesian(
+        ylim=c(0,max(corr_table$log10_pval)+0.25)) +
+    scale_fill_discrete(
+        palette=c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2",
+                  "#D55E00", "#CC79A7"))
+```
+
+```{r, fig.width=3*1.618, fig.height=2*1}
+corr_table |>
+    ggplot(aes(x=var_2, y=log10_pval, group_by=var_1, fill=var_1)) +
+    geom_bar(stat="identity", position="dodge", width=0.75) +
+    geom_hline(yintercept=-log10(0.05), linetype=2) +
+    theme_classic() +
+    ylab(expression(-log[10](p-value))) +
+    theme(axis.text.x =element_blank(),
+          axis.title.x=element_blank(),
+          panel.grid.major.y=element_line(color="lightgray"),
+          panel.border=element_blank(),
+          legend.title=element_blank(),
+          legend.position="none") +
+    coord_cartesian(
+        ylim=c(0,max(corr_table$log10_pval)+0.25)) +
+    scale_fill_discrete(
+        palette=c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2",
+                  "#D55E00", "#CC79A7"))
+```
+
+```{r, fig.width=2*1.618, fig.height=2*1}
+corr_table <- Cor_Result_df |>
+    mutate(log10_pval=-log10(pvalue)) |>
+    mutate(
+        var_1=factor(
+            var_1,
+            levels=c(
+                "K-MMSE", "CDR"))) |>
+    mutate(
+        var_2=factor(
+            var_2,
+            levels=c(
+                "NTF3", "IL10", "IL17C", "uPA",
+                "NTF3, IL10", "NTF3, IL17C", "NTF3, uPA",
+                "IL10, IL17C", "IL10, uPA", "IL17C, uPA"))) |>
+    na.omit()
+
+corr_table |>
+    ggplot(aes(x=var_2, y=log10_pval, group_by=var_1, fill=var_1)) +
+    geom_bar(stat="identity", position="dodge", width=0.75) +
+    geom_hline(yintercept=-log10(0.05), linetype=2) +
+    theme_classic() +
+    ylab(expression(-log[10](p-value))) +
+    theme(axis.text.x =element_text(angle = 90, hjust=1, vjust=0.5),
+          axis.title.x=element_blank(),
+          panel.grid.major.y=element_line(color="lightgray"),
+          panel.border=element_blank(),
+          legend.title=element_blank()) +
+    coord_cartesian(
+        ylim=c(0,max(corr_table$log10_pval)+0.25)) +
+    scale_fill_discrete(
+        palette=c("#F8766D", "#619CFF"))
+```
+
+```{r, fig.width=2*1.618, fig.height=2*1}
+corr_table |>
+    ggplot(aes(x=var_2, y=log10_pval, group_by=var_1, fill=var_1)) +
+    geom_bar(stat="identity", position="dodge", width=0.75) +
+    geom_hline(yintercept=-log10(0.05), linetype=2) +
+    theme_classic() +
+    ylab(expression(-log[10](p-value))) +
+    theme(axis.text.x =element_text(angle = 90, hjust=1, vjust=0.5),
+          axis.title.x=element_blank(),
+          panel.grid.major.y=element_line(color="lightgray"),
+          panel.border=element_blank(),
+          legend.title=element_blank(),
+          legend.position="none") +
+    coord_cartesian(
+        ylim=c(0,max(corr_table$log10_pval)+0.25)) +
+    scale_fill_discrete(
+        palette=c("#F8766D", "#619CFF"))
+```
+
+# sessionInfo()
+
+```{r}
+date()
+```
+
+```{r}
+sessionInfo()
+```

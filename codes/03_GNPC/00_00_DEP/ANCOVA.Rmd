@@ -1,0 +1,388 @@
+---
+title: "ANCOVA"
+output:
+    html_document:
+        toc: true
+        toc_float: true
+        number_sections: true
+        code_folding: hide
+---
+
+```{r}
+rm(list=ls())
+```
+
+# Loading Packages
+
+```{r}
+# install.packages("data.table")
+# install.packages("dplyr")
+# install.packages("reshape2")
+# install.packages("ggplot2")
+# install.packages("rstatix")
+
+suppressPackageStartupMessages({
+    library(data.table)
+    library(dplyr)
+    library(reshape2)
+    library(ggplot2)
+    library(rstatix)
+})
+```
+
+# Reading Data
+
+## Prot Info
+
+```{r}
+prot_info <-
+    fread(paste0(
+        "..",
+        "/..",
+        "/00_Data",
+        "/03_00_GNPC",
+        "/SomalogicAnalyteInfoV1_anonymized.csv")) |>
+    filter(
+        entrez_gene_symbol %in% c(
+            "IL10", "IL17C", "NTF3", "PLAU")) |>
+    arrange(table_name, column_name)
+```
+
+## Person & Sample Data
+
+```{r}
+df_person_sample <-
+    fread(paste0(
+        "..",
+        "/..",
+        "/00_Data",
+        "/03_00_GNPC",
+        "/PersonMappingV1_anonymized.csv")) |> 
+    select_at(c("person_id", "sample_id")) |>
+    left_join(
+        fread(paste0(
+            "..",
+            "/..",
+            "/00_Data",
+            "/03_00_GNPC",
+            "/SomalogicMetaV1_anonymized.csv")) |>
+            filter(sample_type == "Sample") |>
+            filter(row_check == "PASS") |>
+            select_at(c("sample_id", "sample_matrix", "visit")),
+        by="sample_id") |>
+    na.omit() |>
+    arrange(person_id) |>
+    left_join(
+        fread(paste0(
+            "..",
+            "/..",
+            "/00_Data",
+            "/03_00_GNPC",
+            "/ClinicalV1_anonymized.csv")),
+        by="sample_id")
+
+is_last_visit_df <-
+    df_person_sample |>
+    group_by(person_id, sample_matrix, contributor_code) |>
+    summarize(visit=max(visit, na.rm=TRUE)) |>
+    mutate(is_last_visit=TRUE)
+
+df_person_sample <-
+    df_person_sample |>
+    left_join(
+        is_last_visit_df,
+        by=c("person_id", "sample_matrix", "contributor_code", "visit")) |>
+    mutate(
+        Group = NA) |>
+    mutate(
+        Group = ifelse(
+            (ad == 1) &
+                ((cdr >= 1) | 
+                     ((cdr == -1) &
+                          (cognitive_test_score != -1) &
+                          (((cognitive_test_battery == "MMSE") &
+                                (cognitive_test_score < 24)) |
+                               ((cognitive_test_battery == "MOCA") &
+                                    (cognitive_test_score < 17))))) &
+                (mci_sci != 1) &
+                (computed_clinical_diagnosis != 2),
+            "AD", Group)) |>
+    mutate(
+        Group = ifelse(
+            (pd == 1),
+            "PD", Group)) |>
+    mutate(
+        Group = ifelse(
+            (als == 1),
+            "ALS", Group)) |>
+    mutate(
+        Group = ifelse(
+            (ftd == 1),
+            "FTD", Group)) |>
+    mutate(
+        Group = ifelse(
+            (recruited_control == 1) |
+                (((cdr == 0) | 
+                      ((cdr == -1) &
+                           (((cognitive_test_battery == "MMSE") &
+                                 (cognitive_test_score >= 24)) |
+                                ((cognitive_test_battery == "MOCA") &
+                                     (cognitive_test_score >= 17))))) &
+                     (ad != 1) &
+                     (pd != 1) &
+                     (als != 1) &
+                     (ftd != 1) &
+                     (mci_sci != 1)),
+            "CN_Except_HC", Group)) |>
+    mutate(
+        Group = ifelse(
+            (Group == "CN_Except_HC") &
+                (diabetes != 1) &
+                (chf != 1) &
+                (copd != 1) &
+                (mi != 1) &
+                (afib != 1) &
+                (angina != 1) &
+                (hyperlipidaemia != 1) &
+                (depression != 1) &
+                (anxiety != 1),
+            "HC", Group)) |>
+    mutate(
+        Group = ifelse(
+            (stroke == 1) |
+                (tia == 1) |
+                (tbi == 1) |
+                (cancer == 1),
+            "stroke_tia_tbi_or_cancer", Group)) |>
+    mutate(
+        Group = ifelse(
+            ((ad != 1)|(pd != 1)) &
+                ((ad != 1)|(als != 1)) &
+                ((ad != 1)|(pd != 1)) &
+                ((pd != 1)|(als != 1)) &
+                ((pd != 1)|(ftd != 1)) &
+                ((als != 1)|(ftd != 1)),
+            Group, "multiple_ND")) |>
+    mutate(
+        Group = ifelse(
+            (age_at_visit != -1) & (sex != -1),
+            Group, "missing_Age_or_Sex")) |>
+    mutate(
+        Group = ifelse(
+            is.na(is_last_visit),
+            "visit_not_last", Group)) |>
+    filter(Group %in% c("HC", "PD")) |>
+    filter(sample_matrix == "EDTA Plasma") |>
+    filter(contributor_code %in% c("C","F","I","J","L","N","Q","R")) |>
+    select_at(c("person_id", "sample_id", "sample_matrix", "contributor_code",
+                "age_at_visit", "sex", "Group"))
+```
+
+## log2 Prot Exp
+
+```{r}
+log2Exp_table <- df_person_sample
+
+tmp_table_name <-
+    prot_info$table_name |>
+    unique()
+
+for(i in tmp_table_name){
+    tmp_prot_info_i <-
+        prot_info |>
+        filter(table_name == i)
+    
+    log2Exp_table <-
+        log2Exp_table |>
+        left_join(
+            fread(paste0(
+                "..",
+                "/..",
+                "/00_Data",
+                "/03_00_GNPC",
+                "/",
+                i |>
+                    strsplit("_", fixed=TRUE) |>
+                    lapply(`[`,1) |>
+                    unlist() |>
+                    unname(),
+                "_anonymized.csv")) |>
+                select_at(c(
+                    "sample_id",
+                    tmp_prot_info_i$column_name)) |>
+                mutate_at(-1, as.numeric) |>
+                mutate_at(-1, log2),
+            by="sample_id")
+}
+```
+
+# ANCOVA
+
+## Control group, Experimental group, Test
+
+```{r}
+group_test_df <- data.frame()
+
+for(tmp_adj_var in c(
+    "contributor_code;age_at_visit;sex")){
+    group_test_df <- rbind(
+        group_test_df,
+        data.frame(
+            CG      = c("HC"),
+            EG      = c("PD"),
+            adj_var = tmp_adj_var,
+            test    = "ANCOVA"))
+}
+```
+
+## Variables to analyze
+
+```{r}
+group_var_df <- data.frame(
+    group_var="Group",
+    name_modified="Group")
+
+cont_var_df <- data.frame(
+    group_var=prot_info$column_name,
+    name_modified=prot_info$entrez_gene_symbol)
+```
+
+## Analysis result
+
+```{r, fig.width=1.618*2, fig.height=2}
+raw_data <- log2Exp_table |> data.frame()
+
+result_table <- data.frame()
+for(i in 1:nrow(group_test_df)){
+    result_table2 <- data.frame()
+    for(j in 1:nrow(cont_var_df)){
+        try({
+            if(is.na(group_test_df$adj_var[i]) |
+               (group_test_df$adj_var[i]=="")){
+                tmp_raw_data <-
+                    raw_data |>
+                    select_at(vars(c(
+                        group_var_df$group_var,
+                        cont_var_df$group_var[j])))
+            }else{
+                tmp_raw_data <-
+                    raw_data |>
+                    select_at(vars(c(
+                        group_var_df$group_var,
+                        cont_var_df$group_var[j],
+                        group_test_df$adj_var[i] |>
+                            strsplit(";",fixed=TRUE) |>
+                            unlist())))
+            }
+            
+            tmp_raw_data <- tmp_raw_data |>
+                mutate(Group = ifelse(
+                    .data[[group_var_df$group_var]] %in%
+                        (group_test_df$CG[i] |>
+                             strsplit(";",fixed=TRUE) |>
+                             unlist()),
+                    0, ifelse(.data[[group_var_df$group_var]] %in%
+                                  (group_test_df$EG[i] |>
+                                       strsplit(";",fixed=TRUE) |>
+                                       unlist()),
+                              1, NA))) |>
+                na.omit()
+            
+            tmp_raw_data[[cont_var_df$group_var[j]]] <-
+                scale(tmp_raw_data[[cont_var_df$group_var[j]]])
+            
+            if(group_test_df$test[i] == "Welch's t-test"){
+                tmp_result <- 
+                    as.formula(paste0(
+                        cont_var_df$group_var[j],
+                        " ~ Group")) |>
+                    t.test(data=tmp_raw_data)
+                tmp_p_value <- tmp_result$p.value
+                tmp_diff <-
+                    mean(
+                        tmp_raw_data[[
+                            cont_var_df$group_var[j]]][
+                                tmp_raw_data$Group==1])-
+                    mean(
+                        tmp_raw_data[[
+                            cont_var_df$group_var[j]]][
+                                tmp_raw_data$Group==0])
+            }
+            if(group_test_df$test[i] == "Mann-Whitney U test"){
+                tmp_result <- 
+                    as.formula(paste0(
+                        cont_var_df$group_var[j],
+                        " ~ Group")) |>
+                    wilcox.test(data=tmp_raw_data)
+                tmp_p_value <- tmp_result$p.value
+                tmp_diff <-
+                    median(
+                        tmp_raw_data[[
+                            cont_var_df$group_var[j]]][
+                                tmp_raw_data$Group==1])-
+                    median(
+                        tmp_raw_data[[
+                            cont_var_df$group_var[j]]][
+                                tmp_raw_data$Group==0])
+            }
+            if(group_test_df$test[i] == "ANCOVA"){
+                tmp_result <- 
+                    as.formula(paste0(
+                        cont_var_df$group_var[j],
+                        " ~ Group + ",
+                        group_test_df$adj_var[i] |>
+                            strsplit(";",fixed=TRUE) |>
+                            unlist() |>
+                            paste0(collapse="+"))) |>
+                    aov(data=tmp_raw_data) |>
+                    Anova(type="III")
+                tmp_p_value <- tmp_result["Group", "Pr(>F)"]
+                
+                tmp_lm <- as.formula(paste0(
+                    cont_var_df$group_var[j],
+                    " ~ Group + ",
+                    group_test_df$adj_var[i] |>
+                        strsplit(";",fixed=TRUE) |>
+                        unlist() |>
+                        paste0(collapse="+"))) |>
+                    lm(data=tmp_raw_data) |>
+                    coef()
+                tmp_diff <- tmp_lm["Group"]
+            }
+            result_table2 <- rbind(
+                result_table2,
+                data.frame(
+                    CG       = group_test_df$CG[i],
+                    N_CG     = sum(1-tmp_raw_data$Group),
+                    EG       = group_test_df$EG[i],
+                    N_EG     = sum(tmp_raw_data$Group),
+                    adj_var  = group_test_df$adj_var[i],
+                    Test     = group_test_df$test[i],
+                    var      = cont_var_df$group_var[j],
+                    var_name = cont_var_df$name_modified[j],
+                    std_coef = tmp_diff,
+                    p_value  = tmp_p_value))
+        })
+    }
+    result_table2 <- result_table2 |>
+        mutate(adj_p=p.adjust(p_value, method="fdr"))
+    result_table <- rbind(result_table, result_table2)
+}
+
+row.names(result_table) <- NULL
+```
+
+```{r}
+result_table |>
+    fwrite("./test_result.csv")
+```
+
+# sessionInfo()
+
+```{r}
+date()
+```
+
+```{r}
+sessionInfo()
+```

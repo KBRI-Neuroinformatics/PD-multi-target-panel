@@ -1,0 +1,157 @@
+---
+title: "Pearson's Correlation"
+output:
+    html_document:
+        toc: true
+        toc_float: true
+        number_sections: true
+---
+
+```{r}
+rm(list=ls())
+```
+
+# Loading Packages
+
+```{r}
+# install.packages("data.table")
+# install.packages("dplyr")
+# install.packages("reshape2")
+# install.packages("ggplot2")
+# install.packages("corrplot")
+
+suppressPackageStartupMessages({
+    library(data.table)
+    library(dplyr)
+    library(reshape2)
+    library(ggplot2)
+    library(corrplot)
+})
+```
+
+# Reading Datasets
+
+```{r}
+NPX_table <- fread(paste0(
+    "..",
+    "/..",
+    "/00_Data",
+    "/02_00_Exp_table.csv"))
+```
+
+# Result Table
+
+## Overall
+
+```{r}
+anal_data <- NPX_table
+```
+
+### Continuous Variables
+
+```{r}
+tmp_cont_var_df <-
+    data.frame(
+        var=
+            c("NTF3", "IL10", "IL17C", "uPA"),
+        var_name=
+            c("NTF3", "IL10", "IL17C", "uPA"))
+```
+
+```{r, fig.width=2*1.618, fig.height=2}
+final_result <- data.frame()
+
+for(i in 1:(nrow(tmp_cont_var_df)-1)){
+    tmp_var_i <- tmp_cont_var_df$var[i]
+    tmp_var_name_i <- tmp_cont_var_df$var_name[i]
+    tmp_df_i <- anal_data |> select_at(tmp_var_i)
+    
+    for(j in (i+1):nrow(tmp_cont_var_df)){
+        tmp_var_j      <- tmp_cont_var_df$var[j]
+        tmp_var_name_j <- tmp_cont_var_df$var_name[j]
+        tmp_df_j       <- anal_data |> select_at(tmp_var_j)
+        
+        result_table <-
+            data.frame(
+                var_i=tmp_var_i,
+                var_j=tmp_var_j,
+                var_name_i=tmp_var_name_i,
+                var_name_j=tmp_var_name_j,
+                Pearson_cor=NA,
+                Pearson_pvalue=NA,
+                Spearman_cor=NA,
+                Spearman_pvalue=NA)
+        
+        tmp_df <- cbind(
+            tmp_df_i, tmp_df_j) |>
+            mutate_all(as.numeric) |>
+            na.omit()
+        
+        try({
+            tmp_pearson_result <- cor.test(
+                tmp_df |> select_at(tmp_var_i) |> unlist() |> unname(),
+                tmp_df |> select_at(tmp_var_j) |> unlist() |> unname(),
+                method = "pearson",
+                exact  = TRUE)
+            result_table$Pearson_cor <- tmp_pearson_result$estimate
+            result_table$Pearson_pvalue <- tmp_pearson_result$p.value
+        })
+        
+        try({
+            tmp_spearman_result <- cor.test(
+                tmp_df |> select_at(tmp_var_i) |> unlist() |> unname(),
+                tmp_df |> select_at(tmp_var_j) |> unlist() |> unname(),
+                method = "spearman",
+                exact  = TRUE)
+            result_table$Spearman_cor <- tmp_spearman_result$estimate
+            result_table$Spearman_pvalue <- tmp_spearman_result$p.value
+        })
+        
+        final_result <-
+            rbind(
+                final_result,
+                result_table)
+        
+        print(result_table)
+    }
+}
+
+row.names(final_result) <- NULL
+```
+
+### Saving the result
+
+```{r}
+final_result |>
+    fwrite("./Overall_FINAL_RESULT.csv")
+```
+
+# 4x4 heatmap (Pearson's Correlation)
+
+```{r, fig.width=3*1.618, fig.height=3*1.618}
+cor_matrix <- cor(
+    anal_data |>
+        select_at(tmp_cont_var_df$var),
+    method = "pearson")
+
+corrplot(
+    cor_matrix,
+    method = "color",
+    type = "upper",
+    col = colorRampPalette(c("#619CFF", "white", "#F8766D"))(100),
+    tl.cex = 1.0,
+    tl.col = "black",
+    tl.srt = 45,
+    addCoef.col = "black"
+)
+```
+
+# sessionInfo()
+
+```{r}
+date()
+```
+
+```{r}
+sessionInfo()
+```

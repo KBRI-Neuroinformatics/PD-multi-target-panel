@@ -1,0 +1,19 @@
+var,value,n,prop,mean,SD,median,MIN,Q1,Q3,MAX,KSTest_pvalue,SWTest_pvalue
+Sex,F,8,0.533333333333333,,,,,,,,,
+Sex,M,7,0.466666666666667,,,,,,,,,
+Age (year),Missing,0,0,,,,,,,,,
+Age (year),"",,,70.9333333333333,5.58654847016687,74,59,66.5,75,77,0,0.0336950643838684
+K-MMSE total score,Missing,1,0.0666666666666667,,,,,,,,,
+K-MMSE total score,"",,,28.8571428571429,1.23145585242976,29,27,28,30,30,0,0.00616909901711778
+UPDRS Part I,Missing,15,1,,,,,,,,,
+UPDRS Part I,"",,,,,,Inf,,,-Inf,,
+UPDRS Part II,Missing,15,1,,,,,,,,,
+UPDRS Part II,"",,,,,,Inf,,,-Inf,,
+UPDRS Part III,Missing,15,1,,,,,,,,,
+UPDRS Part III,"",,,,,,Inf,,,-Inf,,
+UPDRS Part IV,Missing,15,1,,,,,,,,,
+UPDRS Part IV,"",,,,,,Inf,,,-Inf,,
+Modified H Y,Missing,15,1,,,,,,,,,
+Modified H Y,"",,,,,,Inf,,,-Inf,,
+SEADL Score,Missing,15,1,,,,,,,,,
+SEADL Score,"",,,,,,Inf,,,-Inf,,

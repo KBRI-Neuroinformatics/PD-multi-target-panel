@@ -1,0 +1,214 @@
+---
+title: "t-test, Mann-Whitney U test, ANOVA, Kruskal-wallis test, Chisquare test, Fisher's exact test"
+output:
+    html_document:
+        toc: true
+        toc_float: true
+        number_sections: true
+        code_folding: hide
+---
+
+```{r}
+rm(list=ls())
+```
+
+# Loading Packages
+
+```{r}
+# install.packages("data.table")
+# install.packages("dplyr")
+# install.packages("reshape2")
+
+suppressPackageStartupMessages({
+    library(data.table)
+    library(dplyr)
+    library(reshape2)
+})
+```
+
+# Reading Datasets
+
+```{r}
+my_data <- fread(paste0(
+    "..",
+    "/..",
+    "/00_Data",
+    "/01_00_NPX_table.csv"))
+```
+
+# Result Table
+
+## Overall
+
+```{r}
+anal_data <- my_data
+```
+
+### Categorycal Variables
+
+```{r}
+tmp_group_var_df <-
+    data.frame(
+        var=
+            c("Sample.Group"),
+        var_name=
+            c("Group"))
+
+tmp_cat_var_df <-
+    data.frame(
+        var=
+            c("Sex"),
+        var_name=
+            c("Sex"))
+```
+
+```{r}
+anal_data <- anal_data |>
+    mutate_at(tmp_group_var_df$var, as.character) |>
+    mutate_at(tmp_cat_var_df$var, as.character)
+
+final_result <- data.frame()
+for(i in 1:nrow(tmp_group_var_df)){
+    tmp_group_var <- tmp_group_var_df$var[i]
+    tmp_group_var_name <- tmp_group_var_df$var_name[i]
+    tmp_group_df <- anal_data |> select_at(tmp_group_var)
+    
+    for(j in 1:nrow(tmp_cat_var_df)){
+        tmp_var      <- tmp_cat_var_df$var[j]
+        tmp_var_name <- tmp_cat_var_df$var_name[j]
+        tmp_df       <- anal_data |> select_at(tmp_var)
+        
+        result_table <-
+            data.frame(
+                group=tmp_group_var_name,
+                var=tmp_var_name,
+                tTest_pvalue=NA,
+                MWUTest_pvalue=NA,
+                ANOVA_pvalue=NA,
+                KWTest_pvalue=NA,
+                ChisqTest_pvalue=NA,
+                FishersExactTest_pvalue=NA)
+        try(
+            result_table$ChisqTest_pvalue <-
+                chisq.test(
+                    cbind(tmp_group_df, tmp_df) |> na.omit() |> table(),
+                    correct=TRUE)$p.value
+        )
+        
+        try(
+            result_table$FishersExactTest_pvalue <-
+                fisher.test(
+                    cbind(tmp_group_df, tmp_df) |> na.omit() |> table()
+                )$p.value
+        )
+        
+        final_result <-
+            rbind(
+                final_result,
+                result_table)
+    }
+}
+
+row.names(final_result) <- NULL
+```
+
+### Continuous Variables
+
+```{r}
+tmp_group_var_df <-
+    data.frame(
+        var=
+            c("Sample.Group"),
+        var_name=
+            c("Group"))
+
+tmp_cont_var_df <-
+    data.frame(
+        var=c(
+            "만.나이", "K_MMSE._total._score"),
+        var_name=c(
+            "Age (year)", "K-MMSE total score"))
+```
+
+```{r}
+anal_data <- anal_data |>
+    mutate_at(tmp_group_var_df$var, as.character) |>
+    mutate_at(tmp_cont_var_df$var, as.numeric)
+
+for(i in 1:nrow(tmp_group_var_df)){
+    tmp_group_var <- tmp_group_var_df$var[i]
+    tmp_group_var_name <- tmp_group_var_df$var_name[i]
+    tmp_group_df <- anal_data |> select_at(tmp_group_var)
+    
+    for(j in 1:nrow(tmp_cont_var_df)){
+        tmp_var      <- tmp_cont_var_df$var[j]
+        tmp_var_name <- tmp_cont_var_df$var_name[j]
+        tmp_df       <- anal_data |> select_at(tmp_var)
+        
+        result_table <-
+            data.frame(
+                group=tmp_group_var_name,
+                var=tmp_var_name,
+                tTest_pvalue=NA,
+                MWUTest_pvalue=NA,
+                ANOVA_pvalue=NA,
+                KWTest_pvalue=NA,
+                ChisqTest_pvalue=NA,
+                FishersExactTest_pvalue=NA)
+        try(
+            result_table$tTest_pvalue <-
+                t.test(
+                    formula(paste(tmp_var,"~",tmp_group_var)),
+                    data=cbind(tmp_group_df, tmp_df) |> na.omit())$p.value
+        )
+        
+        try(
+            result_table$MWUTest_pvalue <-
+                wilcox.test(
+                    formula(paste(tmp_var,"~",tmp_group_var)),
+                    data=cbind(tmp_group_df, tmp_df) |> na.omit())$p.value
+        )
+        
+        try(
+            result_table$ANOVA_pvalue <-
+                aov(
+                    formula(paste(tmp_var,"~",tmp_group_var)),
+                    data=cbind(tmp_group_df, tmp_df) |> na.omit()) |>
+                summary() |>
+                (function(x){unlist(x)["Pr(>F)1"]})() |>
+                unname()
+        )
+        
+        try(
+            result_table$KWTest_pvalue <-
+                kruskal.test(
+                    formula(paste(tmp_var,"~",tmp_group_var)),
+                    data=cbind(tmp_group_df, tmp_df) |> na.omit())$p.value
+        )
+        
+        final_result <-
+            rbind(
+                final_result,
+                result_table)
+    }
+}
+
+row.names(final_result) <- NULL
+```
+
+### Saving the result
+
+```{r}
+final_result |>
+    fwrite("./Overall_FINAL_RESULT.csv")
+```
+
+# sessionInfo()
+
+```{r}
+date()
+```
+
+```{r}
+sessionInfo()
+```

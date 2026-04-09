@@ -1,0 +1,3 @@
+var,value,n,prop,mean,SD,median,MIN,Q1,Q3,MAX,KSTest_pvalue,SWTest_pvalue
+Group,HC,15,0.555555555555556,,,,,,,,,
+Group,PD,12,0.444444444444444,,,,,,,,,

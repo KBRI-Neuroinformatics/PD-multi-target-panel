@@ -1,0 +1,402 @@
+---
+title: "n(%), mean±SD, median(IQR), normality test"
+output:
+    html_document:
+        toc: true
+        toc_float: true
+        number_sections: true
+        code_folding: hide
+---
+
+```{r}
+rm(list=ls())
+```
+
+# Loading Packages
+
+```{r}
+# install.packages("data.table")
+# install.packages("dplyr")
+# install.packages("reshape2")
+
+suppressPackageStartupMessages({
+    library(data.table)
+    library(dplyr)
+    library(reshape2)
+})
+```
+
+# Reading Datasets
+
+```{r}
+NPX_table <- fread(paste0(
+    "..",
+    "/..",
+    "/00_Data",
+    "/02_00_Exp_table.csv"))
+```
+
+# Preprocessing
+
+```{r}
+NPX_table <-
+    NPX_table |>
+    mutate(Aβ42_over_40 = Aβ42...pg.ml./Aβ40...pg.ml.)
+```
+
+# Result Table
+
+## Overall
+
+### Categorical Variables
+
+```{r}
+tmp_cat_var_df <-
+    data.frame(
+        var=
+            c("Group"),
+        var_name=
+            c("Group"))
+```
+
+```{r, warning=FALSE}
+anal_data <-
+    NPX_table
+final_result <- data.frame()
+
+for(i in 1:nrow(tmp_cat_var_df)){
+    tmp_var      <- tmp_cat_var_df$var[i]
+    tmp_var_name <- tmp_cat_var_df$var_name[i]
+    tmp_df       <- anal_data |> select_at(tmp_var)
+    
+    result_table <-
+        tmp_df |>
+        group_by_at(tmp_var) |>
+        summarize(n=n()) |>
+        ungroup() |>
+        mutate(prop=n/sum(n)) |>
+        rename_at(vars(tmp_var), ~ "value")
+    
+    result_table <-
+        data.frame(
+            var=tmp_var_name,
+            result_table,
+            mean=NA, SD=NA,
+            median=NA, MIN=NA, Q1=NA, Q3=NA, MAX=NA,
+            KSTest_pvalue=NA,
+            SWTest_pvalue=NA)
+    
+    final_result <-
+        rbind(
+            final_result,
+            result_table)
+}
+```
+
+### Saving the result
+
+```{r}
+final_result$value[is.na(final_result$value)] <- "Missing"
+final_result |>
+    fwrite("./Overall_FINAL_RESULT.csv", row.names=FALSE)
+```
+
+## HC
+
+### Categorical Variables
+
+```{r}
+tmp_cat_var_df <-
+    data.frame(
+        var=
+            c("성별"),
+        var_name=
+            c("Sex"))
+```
+
+```{r, warning=FALSE}
+anal_data <-
+    NPX_table |>
+    filter(Group == "HC")
+final_result <- data.frame()
+
+for(i in 1:nrow(tmp_cat_var_df)){
+    tmp_var      <- tmp_cat_var_df$var[i]
+    tmp_var_name <- tmp_cat_var_df$var_name[i]
+    tmp_df       <- anal_data |> select_at(tmp_var)
+    
+    result_table <-
+        tmp_df |>
+        group_by_at(tmp_var) |>
+        summarize(n=n()) |>
+        ungroup() |>
+        mutate(prop=n/sum(n)) |>
+        rename_at(vars(tmp_var), ~ "value")
+    
+    result_table <-
+        data.frame(
+            var=tmp_var_name,
+            result_table,
+            mean=NA, SD=NA,
+            median=NA, MIN=NA, Q1=NA, Q3=NA, MAX=NA,
+            KSTest_pvalue=NA,
+            SWTest_pvalue=NA)
+    
+    final_result <-
+        rbind(
+            final_result,
+            result_table)
+}
+```
+
+### Continuous Variables
+
+```{r}
+tmp_cont_var_df <-
+    data.frame(
+        var=c(
+            "만.나이",
+            "Symptom...onset.age", "Symptom...duration",
+            "K_MMSE.._total.._score", "CDR",
+            "Part.I...Behavior.and..Emotion.", "Part.II...ADL.", 
+            "Part.III...Motor.Scale.", "Part.IV...drug..complication.",
+            "Part.V...Modified..H.Y.Stage.", "Part.VI...S.E.ADL.Score.",
+            "NF.light....pg.ml.", "pTau.181...pg.ml.",
+            "Aβ40...pg.ml.", "Aβ42...pg.ml.", "Aβ42_over_40"),
+        var_name=c(
+            "Age (year)",
+            "Age at symptom on set (years)", "Disease duration (years)",
+            "K-MMSE total score", "CDR",
+            "UPDRS Part I", "UPDRS Part II", 
+            "UPDRS Part III", "UPDRS Part IV",
+            "Modified H Y", "SEADL Score",
+            "NfL", "pTau181",
+            "Aβ40", "Aβ42", "Aβ42/Aβ40"))
+```
+
+```{r, warning=FALSE}
+for(i in 1:nrow(tmp_cont_var_df)){
+    tmp_var      <- tmp_cont_var_df$var[i]
+    tmp_var_name <- tmp_cont_var_df$var_name[i]
+    tmp_df       <- anal_data |> select_at(all_of(tmp_var))
+    
+    result_table <-
+        tmp_df |>
+        group_by_at(tmp_var) |>
+        summarize(n=n()) |>
+        ungroup() |>
+        mutate(prop=n/sum(n)) |>
+        rename_at(vars(tmp_var), ~ "value")
+    
+    result_table <-
+        data.frame(
+            var=tmp_var_name,
+            value=NA,
+            n=tmp_df |> is.na() |> sum()) |>
+        mutate(prop=n/length(unlist(tmp_df))) |>
+        mutate(
+            mean=NA, SD=NA,
+            median=NA, MIN=NA, Q1=NA, Q3=NA, MAX=NA,
+            KSTest_pvalue=NA,
+            SWTest_pvalue=NA)
+    
+    tmp_result_table <-
+        data.frame(
+            var=tmp_var_name,
+            value="",
+            n=NA, prop=NA,
+            mean  =tmp_df |> unlist() |> mean(na.rm=TRUE),
+            SD    =tmp_df |> unlist() |> sd(na.rm=TRUE),
+            median=tmp_df |> unlist() |> median(na.rm=TRUE),
+            MIN   =tmp_df |> unlist() |> min(na.rm=TRUE),
+            Q1    =tmp_df |> unlist() |> quantile(probs=0.25, na.rm=TRUE),
+            Q3    =tmp_df |> unlist() |> quantile(probs=0.75, na.rm=TRUE),
+            MAX   =tmp_df |> unlist() |> max(na.rm=TRUE),
+            KSTest_pvalue=NA,
+            SWTest_pvalue=NA)
+    try(
+        tmp_result_table$KSTest_pvalue <-
+            ks.test(tmp_df |> unlist(), pnorm, exact=TRUE)$p.value
+    )
+    
+    try(
+        tmp_result_table$SWTest_pvalue <-
+            shapiro.test(tmp_df |> unlist())$p.value
+    )
+    
+    result_table <-
+        rbind(
+            result_table,
+            tmp_result_table)
+    
+    final_result <-
+        rbind(
+            final_result,
+            result_table)
+}
+
+row.names(final_result) <- NULL
+```
+
+### Saving the result
+
+```{r}
+final_result$value[is.na(final_result$value)] <- "Missing"
+final_result |>
+    fwrite("./HC_FINAL_RESULT.csv", row.names=FALSE)
+```
+
+## PD
+
+### Categorical Variables
+
+```{r}
+tmp_cat_var_df <-
+    data.frame(
+        var=
+            c("성별"),
+        var_name=
+            c("Sex"))
+```
+
+```{r, warning=FALSE}
+anal_data <-
+    NPX_table |>
+    filter(Group == "PD")
+final_result <- data.frame()
+
+for(i in 1:nrow(tmp_cat_var_df)){
+    tmp_var      <- tmp_cat_var_df$var[i]
+    tmp_var_name <- tmp_cat_var_df$var_name[i]
+    tmp_df       <- anal_data |> select_at(tmp_var)
+    
+    result_table <-
+        tmp_df |>
+        group_by_at(tmp_var) |>
+        summarize(n=n()) |>
+        ungroup() |>
+        mutate(prop=n/sum(n)) |>
+        rename_at(vars(tmp_var), ~ "value")
+    
+    result_table <-
+        data.frame(
+            var=tmp_var_name,
+            result_table,
+            mean=NA, SD=NA,
+            median=NA, MIN=NA, Q1=NA, Q3=NA, MAX=NA,
+            KSTest_pvalue=NA,
+            SWTest_pvalue=NA)
+    
+    final_result <-
+        rbind(
+            final_result,
+            result_table)
+}
+```
+
+### Continuous Variables
+
+```{r}
+tmp_cont_var_df <-
+    data.frame(
+        var=c(
+            "만.나이",
+            "Symptom...onset.age", "Symptom...duration",
+            "K_MMSE.._total.._score", "CDR",
+            "Part.I...Behavior.and..Emotion.", "Part.II...ADL.", 
+            "Part.III...Motor.Scale.", "Part.IV...drug..complication.",
+            "Part.V...Modified..H.Y.Stage.", "Part.VI...S.E.ADL.Score.",
+            "NF.light....pg.ml.", "pTau.181...pg.ml.",
+            "Aβ40...pg.ml.", "Aβ42...pg.ml.", "Aβ42_over_40"),
+        var_name=c(
+            "Age (year)",
+            "Age at symptom on set (years)", "Disease duration (years)",
+            "K-MMSE total score", "CDR",
+            "UPDRS Part I", "UPDRS Part II", 
+            "UPDRS Part III", "UPDRS Part IV",
+            "Modified H Y", "SEADL Score",
+            "NfL", "pTau181",
+            "Aβ40", "Aβ42", "Aβ42/Aβ40"))
+```
+
+```{r, warning=FALSE}
+for(i in 1:nrow(tmp_cont_var_df)){
+    tmp_var      <- tmp_cont_var_df$var[i]
+    tmp_var_name <- tmp_cont_var_df$var_name[i]
+    tmp_df       <- anal_data |> select_at(all_of(tmp_var))
+    
+    result_table <-
+        tmp_df |>
+        group_by_at(tmp_var) |>
+        summarize(n=n()) |>
+        ungroup() |>
+        mutate(prop=n/sum(n)) |>
+        rename_at(vars(tmp_var), ~ "value")
+    
+    result_table <-
+        data.frame(
+            var=tmp_var_name,
+            value=NA,
+            n=tmp_df |> is.na() |> sum()) |>
+        mutate(prop=n/length(unlist(tmp_df))) |>
+        mutate(
+            mean=NA, SD=NA,
+            median=NA, MIN=NA, Q1=NA, Q3=NA, MAX=NA,
+            KSTest_pvalue=NA,
+            SWTest_pvalue=NA)
+    
+    tmp_result_table <-
+        data.frame(
+            var=tmp_var_name,
+            value="",
+            n=NA, prop=NA,
+            mean  =tmp_df |> unlist() |> mean(na.rm=TRUE),
+            SD    =tmp_df |> unlist() |> sd(na.rm=TRUE),
+            median=tmp_df |> unlist() |> median(na.rm=TRUE),
+            MIN   =tmp_df |> unlist() |> min(na.rm=TRUE),
+            Q1    =tmp_df |> unlist() |> quantile(probs=0.25, na.rm=TRUE),
+            Q3    =tmp_df |> unlist() |> quantile(probs=0.75, na.rm=TRUE),
+            MAX   =tmp_df |> unlist() |> max(na.rm=TRUE),
+            KSTest_pvalue=NA,
+            SWTest_pvalue=NA)
+    try(
+        tmp_result_table$KSTest_pvalue <-
+            ks.test(tmp_df |> unlist(), pnorm, exact=TRUE)$p.value
+    )
+    
+    try(
+        tmp_result_table$SWTest_pvalue <-
+            shapiro.test(tmp_df |> unlist())$p.value
+    )
+    
+    result_table <-
+        rbind(
+            result_table,
+            tmp_result_table)
+    
+    final_result <-
+        rbind(
+            final_result,
+            result_table)
+}
+
+row.names(final_result) <- NULL
+```
+
+### Saving the result
+
+```{r}
+final_result$value[is.na(final_result$value)] <- "Missing"
+final_result |>
+    fwrite("./PD_FINAL_RESULT.csv", row.names=FALSE)
+```
+
+# sessionInfo()
+
+```{r}
+date()
+```
+
+```{r}
+sessionInfo()
+```

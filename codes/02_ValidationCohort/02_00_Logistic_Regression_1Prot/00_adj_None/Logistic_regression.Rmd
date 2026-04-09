@@ -1,0 +1,372 @@
+---
+title: "Logistic Regression"
+output:
+    html_document:
+        toc: true
+        toc_float: true
+        number_sections: true
+        code_folding: hide
+---
+
+```{r}
+rm(list=ls())
+```
+
+# Loading Packages
+
+```{r}
+# install.packages("data.table")
+# install.packages("dplyr")
+# install.packages("reshape2")
+# install.packages("ggplot2")
+# install.packages("pROC")
+
+suppressPackageStartupMessages({
+    library(data.table)
+    library(dplyr)
+    library(reshape2)
+    library(ggplot2)
+    library(pROC)
+})
+```
+
+# Reading Datasets
+
+## NPX table
+
+```{r}
+NPX_table <- fread(paste0(
+    "..",
+    "/..",
+    "/..",
+    "/00_Data",
+    "/02_00_Exp_table.csv"))
+```
+
+# Preprocessing
+
+```{r}
+NPX_table <-
+    NPX_table |>
+    filter(Group %in% c("HC", "PD")) |>
+    mutate(Group=
+               factor(Group,
+                      levels=c("HC", "PD")))
+```
+
+# Logistic Regression
+
+```{r}
+tmp_group_var_df <-
+    data.frame(
+        var=
+            c("Group"),
+        var_name=
+            c("Group"))
+
+tmp_var_df <-
+    data.frame(
+        var=c(
+            "NTF3", "IL10", "IL17C", "uPA"),
+        var_name=c(
+            "NTF3", "IL10", "IL17C", "uPA"))
+```
+
+```{r}
+tmp_model_formula <- c("1", tmp_var_df$var)
+```
+
+```{r, fig.width=1.618*3.5, fig.height=1.618*3.5, warning=FALSE, error=FALSE}
+anal_data <- NPX_table |> mutate_at(tmp_var_df$var, as.numeric)
+final_result <- data.frame()
+roc_curve_df <- data.frame()
+
+for(i in 1:nrow(tmp_group_var_df)){
+    tmp_group_var <- tmp_group_var_df$var[i]
+    tmp_group_var_name <- tmp_group_var_df$var_name[i]
+    tmp_group_df <- anal_data |> select_at(tmp_group_var)
+    
+    for(j in 1:length(tmp_model_formula)){
+        tmp_var <-
+            tmp_model_formula[j]
+        tmp_var_name <-
+            tmp_var_df |>
+            filter(var %in% tmp_var) |>
+            dplyr::select(var_name) |>
+            unlist() |>
+            unname()
+        
+        if(tmp_var == "1"){
+            tmp_df <- c()
+        }else{
+            tmp_df <-
+                anal_data |>
+                select_at(tmp_var)
+        }
+        tmp_formula <-
+            paste(
+                tmp_group_var, "~",
+                tmp_var |>
+                    paste(collapse="+"))
+        
+        cat("####################\n")
+        cat("###", tmp_formula, "###\n")
+        
+        result_table <- data.frame(
+            group_var=tmp_group_var_name,
+            var=ifelse(length(tmp_var_name)==1, tmp_var_name, NA),
+            Model=tmp_formula)
+        
+        if(tmp_var == "1"){
+            tmp_data <-
+                anal_data |>
+                select_at(vars(c(tmp_group_var))) |>
+                na.omit()
+        }else{
+            tmp_data <-
+                anal_data |>
+                select_at(vars(c(tmp_group_var, tmp_var))) |>
+                na.omit()
+        }
+        
+        logistic_reg_result <-
+            glm(tmp_formula,
+                family=binomial,
+                data=tmp_data)
+        
+        logistic_reg_result_summary <-
+            summary(logistic_reg_result)
+        
+        roc_result <- roc(
+            tmp_data[[tmp_group_var]],
+            predict(logistic_reg_result, type="response"),
+            ci=TRUE,
+            direction="<")
+        
+        for(tmp_threshold in roc_result$thresholds){
+            tmp_pred_result <- ifelse(
+                predict(logistic_reg_result, type="response") > tmp_threshold,
+                "PD", "HC")
+            TruePositive <- sum(
+                (tmp_data[[tmp_group_var]] == "PD") & 
+                    (tmp_pred_result == "PD"))
+            FalsePositive <- sum(
+                (tmp_data[[tmp_group_var]] == "HC") & 
+                    (tmp_pred_result == "PD"))
+            FalseNegative <- sum(
+                (tmp_data[[tmp_group_var]] == "PD") & 
+                    (tmp_pred_result == "HC"))
+            TrueNegative <- sum(
+                (tmp_data[[tmp_group_var]] == "HC") & 
+                    (tmp_pred_result == "HC"))
+            
+            roc_curve_df <- rbind(
+                roc_curve_df,
+                data.frame(
+                    Model=
+                        tmp_formula,
+                    Threshold=
+                        tmp_threshold,
+                    Sensitivity=
+                        TruePositive/(TruePositive+FalseNegative),
+                    Specificity=
+                        TrueNegative/(FalsePositive+TrueNegative),
+                    PositivePredictiveValue=
+                        TruePositive/(TruePositive+FalsePositive),
+                    NegativePredictiveValue=
+                        TrueNegative/(FalseNegative+TrueNegative)
+                ))
+        }
+        
+        if(tmp_var == "1"){
+            result_table[["coef"]] <- NA
+            result_table[["coef_pvalue"]] <- NA
+            ref_roc_result <- roc_result
+            
+            result_table[["AUC"]] <- roc_result$auc
+            result_table[["AUC_CI_LB"]] <- roc_result$ci[1]
+            result_table[["AUC_CI_UB"]] <- roc_result$ci[3]
+            result_table[["pvalue_vs_ref"]] <- NA
+        }else{
+            result_table[["coef"]] <- 
+                logistic_reg_result_summary$coefficients[
+                    tmp_var, "Estimate"]
+            result_table[["coef_pvalue"]] <-
+                logistic_reg_result_summary$coefficients[
+                    tmp_var, "Pr(>|z|)"]
+            
+            result_table[["AUC"]] <- roc_result$auc |> as.numeric()
+            result_table[["AUC_CI_LB"]] <- roc_result$ci[1]
+            result_table[["AUC_CI_UB"]] <- roc_result$ci[3]
+            result_table[["pvalue_vs_ref"]] <-
+                roc.test(ref_roc_result, roc_result)$p.value
+        }
+        
+        tmp_threshold <-
+            roc_result$thresholds[
+                which.max(roc_result$sensitivities + roc_result$specificities)]
+        
+        tmp_cutoff <- -(coef(logistic_reg_result)[1]+log((1/tmp_threshold)-1))/coef(logistic_reg_result)[2]
+        
+        tmp_pred_result <-
+            ifelse(
+                predict(logistic_reg_result, type="response") > tmp_threshold,
+                "PD", "HC")
+        tmp_acc <- mean(tmp_data[[tmp_group_var]] == tmp_pred_result)
+        
+        result_table[["AIC"]] <- logistic_reg_result_summary$aic
+        result_table[["Accuracy"]] <- tmp_acc
+        
+        ### LOOCV ###
+        
+        tmp_LOOCV_acc <- numeric(nrow(tmp_data))
+        tmp_LOOCV_AUC <- numeric(nrow(tmp_data))
+        for(iter in 1:nrow(tmp_data)){
+            tmp_LOOCV_data <-
+                tmp_data |>
+                filter(1:nrow(tmp_data) != iter)
+            LOOCV_logistic_reg_result <-
+                glm(tmp_formula,
+                    family=binomial,
+                    data=tmp_LOOCV_data)
+            LOOCV_roc_result <- roc(
+                tmp_LOOCV_data[[tmp_group_var]],
+                predict(LOOCV_logistic_reg_result, type="response"),
+                quiet=TRUE,
+                direction="<")
+            tmp_LOOCV_AUC[iter] <-
+                LOOCV_roc_result$auc
+            tmp_LOOCV_threshold <-
+                LOOCV_roc_result$thresholds[
+                    which.max(
+                        LOOCV_roc_result$sensitivities +
+                            LOOCV_roc_result$specificities)]
+            tmp_LOOCV_pred_result <-
+                ifelse(
+                    predict(LOOCV_logistic_reg_result, type="response") >
+                        tmp_LOOCV_threshold,
+                    "PD", "HC")
+            tmp_LOOCV_acc[iter] <-
+                mean(tmp_LOOCV_data[[tmp_group_var]] == tmp_LOOCV_pred_result)
+        }
+        result_table[["LOOCV_Accuracy_mean"]] <-
+            mean(tmp_LOOCV_acc)
+        result_table[["LOOCV_Accuracy_sd"]] <-
+            sd(tmp_LOOCV_acc)
+        result_table[["LOOCV_Accuracy_mean_se"]] <-
+            sqrt(nrow(tmp_data)-1) * sd(tmp_LOOCV_acc)
+        result_table[["LOOCV_AUC_mean"]] <-
+            mean(tmp_LOOCV_AUC)
+        result_table[["LOOCV_AUC_sd"]] <-
+            sd(tmp_LOOCV_AUC)
+        result_table[["LOOCV_AUC_mean_se"]] <-
+            sqrt(nrow(tmp_data)-1) * sd(tmp_LOOCV_AUC)
+        
+        result_table[["prob_threshold"]] <-
+            tmp_threshold
+        
+        ## result ##
+        
+        final_result <-
+            rbind(
+                final_result,
+                result_table)
+        
+        ## print ##
+        print(logistic_reg_result_summary$coefficients)
+        cat("tmp_threshold =", tmp_threshold, "\n")
+        cat("tmp_cutoff =", tmp_cutoff, "\n")
+    }
+}
+
+final_result <-
+    final_result |>
+    mutate(delta_AIC = AIC - AIC[1])
+
+row.names(final_result) <- NULL
+```
+
+## Saving the result
+
+```{r}
+final_result |>
+    fwrite("./FINAL_RESULT.csv")
+```
+
+```{r}
+roc_curve_df |>
+    fwrite("./ROC_CURVE_value.csv")
+```
+
+# ROC curves
+
+```{r, fig.width=3*1.065, fig.height=3*1}
+roc_curve_df <-
+    roc_curve_df |>
+    left_join(
+        final_result |> 
+            mutate(var = ifelse(var=="", "Baseline", var)) |>
+            mutate(
+                Model_AUC = paste0(
+                    var,
+                    ";  ",sprintf("%.3f", round(AUC,3)),
+                    " (",sprintf("%.3f", round(AUC_CI_LB,3)),
+                    "-",sprintf("%.3f", round(AUC_CI_UB,3)),
+                    ")")) |>
+            select_at(vars("var", "Model", "Model_AUC", "AUC")),
+        by="Model")
+
+roc_curve_df |>
+    filter(var %in% c("NTF3", "IL17C", "IL10", "uPA")) |>
+    ggplot() +
+    aes(
+        x=Specificity,
+        y=Sensitivity,
+        colour=Model_AUC,
+        linetype=Model_AUC) +
+    geom_path() +
+    geom_abline(
+        intercept=1,
+        slope=1,
+        alpha=0.15) +
+    scale_x_reverse() + 
+    labs(colour="AUC (95% CI)",
+         linetype="AUC (95% CI)") +
+    theme_classic() +
+    theme(legend.position      ="bottom",
+          legend.direction     ="vertical",
+          legend.justification ="left") +
+    scale_colour_viridis_d(begin=0.9, end=0)
+```
+
+```{r, fig.width=2*1.065, fig.height=2*1}
+roc_curve_df |>
+    filter(var %in% c("NTF3", "IL17C", "IL10", "uPA")) |>
+    ggplot() +
+    aes(
+        x=Specificity,
+        y=Sensitivity,
+        colour=Model_AUC,
+        linetype=Model_AUC) +
+    geom_path() +
+    geom_abline(
+        intercept=1,
+        slope=1,
+        alpha=0.15) +
+    scale_x_reverse() + 
+    labs(colour="AUC (95% CI)",
+         linetype="AUC (95% CI)") + 
+    theme_classic() +
+    theme(legend.position="none") +
+    scale_colour_viridis_d(begin=0.9, end=0)
+```
+
+# sessionInfo()
+
+```{r}
+date()
+```
+
+```{r}
+sessionInfo()
+```
